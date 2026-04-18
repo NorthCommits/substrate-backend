@@ -16,6 +16,11 @@ class ContextStatus(str, Enum):
     conflicting = "conflicting"
 
 
+class ContextVisibility(str, Enum):
+    private = "private"
+    public = "public"
+
+
 class Context(Base):
     __tablename__ = "contexts"
 
@@ -32,10 +37,20 @@ class Context(Base):
         default=ContextStatus.active,
         nullable=False
     )
+    visibility: Mapped[ContextVisibility] = mapped_column(
+        String(50),
+        default=ContextVisibility.private,
+        nullable=False
+    )
     embedding: Mapped[list] = mapped_column(JSON, nullable=True)
     producer_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("agents.id"),
+        nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id"),
         nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(

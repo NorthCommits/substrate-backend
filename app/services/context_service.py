@@ -1,22 +1,24 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.context import Context, ContextStatus
-from app.schemas.context import ContextPublish, ContextStatusUpdate
+from app.models.context import Context, ContextStatus, ContextVisibility
+from app.schemas.context import ContextPublish, ContextStatusUpdate, ContextVisibilityUpdate
 from app.services.agent_service import get_agent_by_id
 from app.services.embedding_service import generate_embedding, find_similar_contexts
 from app.services.lineage_service import record_lineage
-from app.utils.exceptions import ContextNotFoundException
+from app.utils.exceptions import ContextNotFoundException, ContextForbiddenException
 
 
 async def publish_context(
     db: AsyncSession,
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
     data: ContextPublish
 ) -> Context:
-    await get_agent_by_id(db, data.producer_id)
+    agent = await get_agent_by_id(db, agent_id, workspace_id)
 
     embedding = await generate_embedding(
         f"{data.key} {data.context_type} {str(data.value)}"
@@ -28,8 +30,10 @@ async def publish_context(
         value=data.value,
         context_type=data.context_type,
         status=ContextStatus.active,
+        visibility=data.visibility,
         embedding=embedding,
-        producer_id=data.producer_id,
+        producer_id=agent_id,
+        workspace_id=workspace_id,
     )
     db.add(context)
     await db.flush()
@@ -37,10 +41,10 @@ async def publish_context(
     await record_lineage(
         db=db,
         context_id=context.id,
-        agent_id=data.producer_id,
+        agent_id=agent_id,
         action="published",
         snapshot=data.value,
-        note=f"Context '{data.key}' published by agent"
+        note=f"Context '{data.key}' published by agent '{agent.name}'"
     )
 
     await db.refresh(context, ["producer"])
@@ -49,7 +53,8 @@ async def publish_context(
 
 async def get_context_by_id(
     db: AsyncSession,
-    context_id: uuid.UUID
+    context_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None
 ) -> Context:
     result = await db.execute(
         select(Context)
@@ -59,23 +64,47 @@ async def get_context_by_id(
     context = result.scalar_one_or_none()
     if not context:
         raise ContextNotFoundException(str(context_id))
+
+    if workspace_id:
+        is_own = context.workspace_id == workspace_id
+        is_public = context.visibility == ContextVisibility.public
+        if not is_own and not is_public:
+            raise ContextForbiddenException()
+
     return context
 
 
-async def get_all_contexts(
+async def get_workspace_contexts(
     db: AsyncSession,
+    workspace_id: uuid.UUID,
     context_type: str | None = None,
     status: ContextStatus | None = None,
-    producer_id: uuid.UUID | None = None,
 ) -> list[Context]:
     query = select(Context).options(selectinload(Context.producer))
+    query = query.where(Context.workspace_id == workspace_id)
 
     if context_type:
         query = query.where(Context.context_type == context_type)
     if status:
         query = query.where(Context.status == status)
-    if producer_id:
-        query = query.where(Context.producer_id == producer_id)
+
+    query = query.order_by(Context.created_at.desc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_public_contexts(
+    db: AsyncSession,
+    context_type: str | None = None,
+    status: ContextStatus | None = None,
+) -> list[Context]:
+    query = select(Context).options(selectinload(Context.producer))
+    query = query.where(Context.visibility == ContextVisibility.public)
+
+    if context_type:
+        query = query.where(Context.context_type == context_type)
+    if status:
+        query = query.where(Context.status == status)
 
     query = query.order_by(Context.created_at.desc())
     result = await db.execute(query)
@@ -86,9 +115,10 @@ async def update_context_status(
     db: AsyncSession,
     context_id: uuid.UUID,
     agent_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     data: ContextStatusUpdate
 ) -> Context:
-    context = await get_context_by_id(db, context_id)
+    context = await get_context_by_id(db, context_id, workspace_id)
     previous_status = context.status
     context.status = data.status
     await db.flush()
@@ -106,17 +136,52 @@ async def update_context_status(
     return context
 
 
+async def update_context_visibility(
+    db: AsyncSession,
+    context_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    data: ContextVisibilityUpdate
+) -> Context:
+    context = await get_context_by_id(db, context_id, workspace_id)
+    previous_visibility = context.visibility
+    context.visibility = data.visibility
+    await db.flush()
+
+    await record_lineage(
+        db=db,
+        context_id=context.id,
+        agent_id=agent_id,
+        action=f"visibility_changed",
+        snapshot=context.value,
+        note=f"Visibility changed from '{previous_visibility}' to '{data.visibility.value}'"
+    )
+
+    await db.refresh(context, ["producer"])
+    return context
+
+
 async def search_similar_contexts(
     db: AsyncSession,
     query: str,
+    workspace_id: uuid.UUID | None = None,
     threshold: float = 0.75,
     top_k: int = 5
 ) -> list[Context]:
-    result = await db.execute(
-        select(Context)
-        .where(Context.embedding.isnot(None))
-        .options(selectinload(Context.producer))
-    )
+    q = select(Context).options(selectinload(Context.producer))
+
+    if workspace_id:
+        q = q.where(
+            or_(
+                Context.workspace_id == workspace_id,
+                Context.visibility == ContextVisibility.public
+            )
+        )
+    else:
+        q = q.where(Context.visibility == ContextVisibility.public)
+
+    q = q.where(Context.embedding.isnot(None))
+    result = await db.execute(q)
     all_contexts = list(result.scalars().all())
 
     stored_embeddings = [

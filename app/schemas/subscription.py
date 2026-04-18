@@ -17,6 +17,7 @@ class SubscriptionResponse(BaseModel):
     agent_id: uuid.UUID
     context_type: str
     producer_id: uuid.UUID | None
+    workspace_id: uuid.UUID
     is_active: bool
     created_at: datetime
     agent: AgentSummary

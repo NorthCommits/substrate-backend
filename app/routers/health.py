@@ -11,7 +11,8 @@ router = APIRouter(prefix="/health", tags=["Health"])
 async def health_check():
     return {
         "status": "ok",
-        "service": "Substrate"
+        "service": "Substrate",
+        "version": "2.0.0"
     }
 
 

@@ -34,3 +34,11 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Docker
+.dockerignore
+
+# Backup
+*.zip
+*.bak
+bkup/

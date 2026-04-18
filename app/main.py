@@ -5,7 +5,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.redis import connect_redis, disconnect_redis
-from app.routers import agents, context, subscriptions, graph, health
+from app.routers import (
+    auth,
+    workspaces,
+    api_keys,
+    agents,
+    context,
+    subscriptions,
+    graph,
+    directory,
+    health,
+)
 
 
 @asynccontextmanager
@@ -17,8 +27,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="Shared context and memory bus for multi-agent AI systems",
-    version="0.1.0",
+    description="The shared context and memory bus for multi-agent AI systems. Build agents, publish context, and watch your AI ecosystem come alive.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -31,17 +41,22 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth.router)
+app.include_router(workspaces.router)
+app.include_router(api_keys.router)
 app.include_router(agents.router)
 app.include_router(context.router)
 app.include_router(subscriptions.router)
 app.include_router(graph.router)
+app.include_router(directory.router)
 
 
 @app.get("/")
 async def root():
     return {
         "service": settings.app_name,
-        "version": "0.1.0",
+        "version": "2.0.0",
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
+        "description": "Shared context and memory bus for multi-agent AI systems"
     }

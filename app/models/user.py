@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import String, Boolean, DateTime, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -9,22 +9,19 @@ from sqlalchemy.sql import func
 from app.core.database import Base
 
 
-class Agent(Base):
-    __tablename__ = "agents"
+class User(Base):
+    __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
     )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("workspaces.id"),
-        nullable=False
-    )
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now()
@@ -38,15 +35,6 @@ class Agent(Base):
     # Relationships
     workspace: Mapped["Workspace"] = relationship(
         "Workspace",
-        back_populates="agents"
-    )
-    published_contexts: Mapped[list["Context"]] = relationship(
-        "Context",
-        back_populates="producer",
-        foreign_keys="Context.producer_id"
-    )
-    subscriptions: Mapped[list["Subscription"]] = relationship(
-        "Subscription",
-        back_populates="agent",
-        foreign_keys="[Subscription.agent_id]"
+        back_populates="owner",
+        uselist=False
     )

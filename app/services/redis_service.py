@@ -9,29 +9,31 @@ CONTEXT_CHANNEL_PREFIX = "substrate:context:"
 async def publish_context_event(
     redis: aioredis.Redis,
     context_type: str,
+    workspace_id: str,
     payload: dict
 ) -> None:
-    channel = f"{CONTEXT_CHANNEL_PREFIX}{context_type}"
+    channel = f"{CONTEXT_CHANNEL_PREFIX}{workspace_id}:{context_type}"
+    await redis.publish(channel, json.dumps(payload))
+
+
+async def publish_public_context_event(
+    redis: aioredis.Redis,
+    context_type: str,
+    payload: dict
+) -> None:
+    channel = f"{CONTEXT_CHANNEL_PREFIX}public:{context_type}"
     await redis.publish(channel, json.dumps(payload))
 
 
 async def subscribe_to_context_type(
     redis: aioredis.Redis,
-    context_type: str
+    context_type: str,
+    workspace_id: str
 ):
     pubsub = redis.pubsub()
-    channel = f"{CONTEXT_CHANNEL_PREFIX}{context_type}"
+    channel = f"{CONTEXT_CHANNEL_PREFIX}{workspace_id}:{context_type}"
     await pubsub.subscribe(channel)
     return pubsub
-
-
-async def unsubscribe_from_context_type(
-    redis: aioredis.Redis,
-    context_type: str
-) -> None:
-    pubsub = redis.pubsub()
-    channel = f"{CONTEXT_CHANNEL_PREFIX}{context_type}"
-    await pubsub.unsubscribe(channel)
 
 
 async def cache_context(

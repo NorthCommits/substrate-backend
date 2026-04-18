@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     chat_model: str = "gpt-4o"
 
+    # Auth
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 10080
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False

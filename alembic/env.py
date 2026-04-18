@@ -6,7 +6,7 @@ from alembic import context
 
 from app.core.config import settings
 from app.core.database import Base
-from app.models import Agent, Context, Subscription, Lineage
+from app.models import User, Workspace, ApiKey, Agent, Context, Subscription, Lineage
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
