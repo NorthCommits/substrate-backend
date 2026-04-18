@@ -38,5 +38,6 @@ class Agent(Base):
     )
     subscriptions: Mapped[list["Subscription"]] = relationship(
         "Subscription",
-        back_populates="agent"
+        back_populates="agent",
+        foreign_keys="[Subscription.agent_id]"
     )
