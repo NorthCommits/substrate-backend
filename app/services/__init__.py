@@ -1,5 +1,4 @@
 from app.services import (
-    auth_service,
     workspace_service,
     api_key_service,
     agent_service,
@@ -9,12 +8,9 @@ from app.services import (
     redis_service,
     embedding_service,
     graph_service,
-    email_service,
-    otp_service,
 )
 
 __all__ = [
-    "auth_service",
     "workspace_service",
     "api_key_service",
     "agent_service",
@@ -24,6 +20,4 @@ __all__ = [
     "redis_service",
     "embedding_service",
     "graph_service",
-    "email_service",
-    "otp_service",
 ]

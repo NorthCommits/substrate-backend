@@ -18,16 +18,9 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     chat_model: str = "gpt-4o"
 
-    # Auth
-    jwt_secret_key: str
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 10080
-
-    # Email (Resend)
-    resend_api_key: str
-    from_email: str = "onboarding@resend.dev"
-    from_name: str = "Substrate"
-    frontend_url: str = "https://substrate-frontend.vercel.app"
+    # Supabase
+    supabase_url: str
+    supabase_jwt_secret: str
 
     model_config = SettingsConfigDict(
         env_file=".env",

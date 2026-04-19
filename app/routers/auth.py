@@ -1,17 +1,15 @@
-from fastapi import APIRouter, Depends
+import uuid
+import re
+
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from redis.asyncio import Redis
+from sqlalchemy import select
 
 from app.core.database import get_db
-from app.core.redis import get_redis
 from app.core.security import decode_access_token
-from app.schemas.user import (
-    UserRegister, UserLogin, TokenResponse,
-    UserResponse, RegisterResponse,
-    VerifyEmailRequest, ResendOtpRequest,
-    ForgotPasswordRequest, ResetPasswordRequest
-)
-from app.services import auth_service
+from app.models.user import User
+from app.models.workspace import Workspace
+from app.schemas.user import UserResponse
 from app.utils.exceptions import InvalidTokenException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -20,9 +18,16 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 bearer_scheme = HTTPBearer()
 
 
+def slugify(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_-]+", "-", text)
+    text = re.sub(r"^-+|-+$", "", text)
+    return text
+
+
 async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_db)
 ) -> str:
     token = credentials.credentials
     payload = decode_access_token(token)
@@ -31,57 +36,71 @@ async def get_current_user_id(
     return payload.get("sub")
 
 
-@router.post("/register", response_model=RegisterResponse, status_code=201)
-async def register(
-    data: UserRegister,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis)
-):
-    return await auth_service.register_user(db, redis, data)
+async def get_token_payload(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> dict:
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    if not payload:
+        raise InvalidTokenException()
+    return payload
 
 
-@router.post("/verify-email", response_model=TokenResponse)
-async def verify_email(
-    data: VerifyEmailRequest,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis)
-):
-    return await auth_service.verify_email(db, redis, data)
-
-
-@router.post("/resend-otp")
-async def resend_otp(
-    data: ResendOtpRequest,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis)
-):
-    return await auth_service.resend_otp(db, redis, data)
-
-
-@router.post("/forgot-password")
-async def forgot_password(
-    data: ForgotPasswordRequest,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis)
-):
-    return await auth_service.forgot_password(db, redis, data)
-
-
-@router.post("/reset-password")
-async def reset_password(
-    data: ResetPasswordRequest,
-    db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis)
-):
-    return await auth_service.reset_password(db, redis, data)
-
-
-@router.post("/login", response_model=TokenResponse)
-async def login(
-    data: UserLogin,
+@router.post("/sync", response_model=UserResponse)
+async def sync_user(
+    payload: dict = Depends(get_token_payload),
     db: AsyncSession = Depends(get_db)
 ):
-    return await auth_service.login_user(db, data)
+    """
+    Called by frontend after every Supabase login/signup.
+    Syncs the Supabase user into our PostgreSQL users table
+    and auto-creates a workspace if it's the first time.
+    """
+    user_id = uuid.UUID(payload.get("sub"))
+    email = payload.get("email", "")
+    full_name = payload.get("user_metadata", {}).get("full_name")
+
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
+        return existing_user
+
+    user = User(
+        id=user_id,
+        email=email,
+        hashed_password="supabase_managed",
+        full_name=full_name,
+        is_active=True,
+        is_verified=True,
+    )
+    db.add(user)
+    await db.flush()
+
+    base_slug = slugify(full_name or email.split("@")[0])
+    slug = base_slug
+    counter = 1
+    while True:
+        existing_slug = await db.execute(
+            select(Workspace).where(Workspace.slug == slug)
+        )
+        if not existing_slug.scalar_one_or_none():
+            break
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
+    workspace = Workspace(
+        id=uuid.uuid4(),
+        name=f"{full_name or email.split('@')[0]}'s Workspace",
+        slug=slug,
+        owner_id=user.id,
+    )
+    db.add(workspace)
+    await db.flush()
+
+    return user
 
 
 @router.get("/me", response_model=UserResponse)
@@ -89,8 +108,10 @@ async def me(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    import uuid
-    user = await auth_service.get_user_by_id(db, uuid.UUID(user_id))
+    result = await db.execute(
+        select(User).where(User.id == uuid.UUID(user_id))
+    )
+    user = result.scalar_one_or_none()
     if not user:
         raise InvalidTokenException()
     return user
