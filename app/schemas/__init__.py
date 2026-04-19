@@ -1,4 +1,4 @@
-from app.schemas.user import UserRegister, UserLogin, UserResponse, TokenResponse
+from app.schemas.user import UserResponse
 from app.schemas.workspace import WorkspaceUpdate, WorkspaceResponse, WorkspaceSummary
 from app.schemas.api_key import ApiKeyCreate, ApiKeyResponse, ApiKeyCreatedResponse
 from app.schemas.agent import AgentCreate, AgentUpdate, AgentResponse, AgentSummary
@@ -13,10 +13,7 @@ from app.schemas.subscription import SubscriptionCreate, SubscriptionResponse
 from app.schemas.lineage import LineageResponse
 
 __all__ = [
-    "UserRegister",
-    "UserLogin",
     "UserResponse",
-    "TokenResponse",
     "WorkspaceUpdate",
     "WorkspaceResponse",
     "WorkspaceSummary",
