@@ -3,13 +3,23 @@ import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+import redis.asyncio as aioredis
 
 from app.core.security import hash_password, verify_password, create_access_token
 from app.models.user import User
 from app.models.workspace import Workspace
-from app.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
-from app.utils.exceptions import EmailAlreadyExistsException, InvalidCredentialsException
+from app.schemas.user import (
+    UserRegister, UserLogin, TokenResponse, UserResponse,
+    RegisterResponse, VerifyEmailRequest, ResendOtpRequest
+)
+from app.services.otp_service import (
+    create_and_send_otp, verify_otp,
+    can_resend_otp, set_resend_cooldown, get_cooldown_remaining
+)
+from app.utils.exceptions import (
+    EmailAlreadyExistsException, InvalidCredentialsException
+)
+from fastapi import HTTPException, status
 
 
 def slugify(text: str) -> str:
@@ -20,7 +30,11 @@ def slugify(text: str) -> str:
     return text
 
 
-async def register_user(db: AsyncSession, data: UserRegister) -> TokenResponse:
+async def register_user(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    data: UserRegister
+) -> RegisterResponse:
     existing = await db.execute(
         select(User).where(User.email == data.email)
     )
@@ -32,6 +46,7 @@ async def register_user(db: AsyncSession, data: UserRegister) -> TokenResponse:
         email=data.email,
         hashed_password=hash_password(data.password),
         full_name=data.full_name,
+        is_verified=False,
     )
     db.add(user)
     await db.flush()
@@ -57,6 +72,46 @@ async def register_user(db: AsyncSession, data: UserRegister) -> TokenResponse:
     db.add(workspace)
     await db.flush()
 
+    await create_and_send_otp(redis, data.email, data.full_name)
+
+    return RegisterResponse(
+        message="Account created. Please check your email for a verification code.",
+        email=data.email
+    )
+
+
+async def verify_email(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    data: VerifyEmailRequest
+) -> TokenResponse:
+    result = await db.execute(
+        select(User).where(User.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email"
+        )
+
+    if user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified"
+        )
+
+    is_valid = await verify_otp(redis, data.email, data.otp)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification code"
+        )
+
+    user.is_verified = True
+    await db.flush()
+
     token = create_access_token(subject=str(user.id))
 
     return TokenResponse(
@@ -66,7 +121,46 @@ async def register_user(db: AsyncSession, data: UserRegister) -> TokenResponse:
     )
 
 
-async def login_user(db: AsyncSession, data: UserLogin) -> TokenResponse:
+async def resend_otp(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    data: ResendOtpRequest
+) -> dict:
+    result = await db.execute(
+        select(User).where(User.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email"
+        )
+
+    if user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified"
+        )
+
+    allowed = await can_resend_otp(redis, data.email)
+    if not allowed:
+        remaining = await get_cooldown_remaining(redis, data.email)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {remaining} seconds before requesting a new code"
+        )
+
+    await set_resend_cooldown(redis, data.email)
+    await create_and_send_otp(redis, data.email, user.full_name)
+
+    return {"message": "A new verification code has been sent to your email"}
+
+
+async def login_user(
+    db: AsyncSession,
+    data: UserLogin
+) -> TokenResponse:
     result = await db.execute(
         select(User).where(User.email == data.email)
     )
@@ -74,6 +168,12 @@ async def login_user(db: AsyncSession, data: UserLogin) -> TokenResponse:
 
     if not user or not verify_password(data.password, user.hashed_password):
         raise InvalidCredentialsException()
+
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before logging in"
+        )
 
     token = create_access_token(subject=str(user.id))
 

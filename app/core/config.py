@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 10080
 
+    # Email (Resend)
+    resend_api_key: str
+    from_email: str = "onboarding@resend.dev"
+    from_name: str = "Substrate"
+    frontend_url: str = "https://substrate-frontend.vercel.app"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=False

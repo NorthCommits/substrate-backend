@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from redis.asyncio import Redis
 
 from app.core.database import get_db
+from app.core.redis import get_redis
 from app.core.security import decode_access_token
-from app.schemas.user import UserRegister, UserLogin, TokenResponse, UserResponse
+from app.schemas.user import (
+    UserRegister, UserLogin, TokenResponse,
+    UserResponse, RegisterResponse,
+    VerifyEmailRequest, ResendOtpRequest
+)
 from app.services import auth_service
 from app.utils.exceptions import InvalidTokenException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -24,12 +30,31 @@ async def get_current_user_id(
     return payload.get("sub")
 
 
-@router.post("/register", response_model=TokenResponse, status_code=201)
+@router.post("/register", response_model=RegisterResponse, status_code=201)
 async def register(
     data: UserRegister,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
 ):
-    return await auth_service.register_user(db, data)
+    return await auth_service.register_user(db, redis, data)
+
+
+@router.post("/verify-email", response_model=TokenResponse)
+async def verify_email(
+    data: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    return await auth_service.verify_email(db, redis, data)
+
+
+@router.post("/resend-otp")
+async def resend_otp(
+    data: ResendOtpRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    return await auth_service.resend_otp(db, redis, data)
 
 
 @router.post("/login", response_model=TokenResponse)

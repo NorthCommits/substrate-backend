@@ -15,6 +15,15 @@ class UserLogin(BaseModel):
     password: str
 
 
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6)
+
+
+class ResendOtpRequest(BaseModel):
+    email: EmailStr
+
+
 class UserResponse(BaseModel):
     id: uuid.UUID
     email: str
@@ -30,3 +39,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class RegisterResponse(BaseModel):
+    message: str
+    email: str

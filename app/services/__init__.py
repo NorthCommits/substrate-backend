@@ -9,6 +9,8 @@ from app.services import (
     redis_service,
     embedding_service,
     graph_service,
+    email_service,
+    otp_service,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "redis_service",
     "embedding_service",
     "graph_service",
+    "email_service",
+    "otp_service",
 ]
