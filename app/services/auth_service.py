@@ -10,11 +10,14 @@ from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.user import (
     UserRegister, UserLogin, TokenResponse, UserResponse,
-    RegisterResponse, VerifyEmailRequest, ResendOtpRequest
+    RegisterResponse, VerifyEmailRequest, ResendOtpRequest,
+    ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.services.otp_service import (
     create_and_send_otp, verify_otp,
-    can_resend_otp, set_resend_cooldown, get_cooldown_remaining
+    can_resend_otp, set_resend_cooldown, get_cooldown_remaining,
+    create_and_send_reset_otp, verify_reset_otp,
+    can_resend_reset_otp, set_reset_resend_cooldown, get_reset_cooldown_remaining
 )
 from app.utils.exceptions import (
     EmailAlreadyExistsException, InvalidCredentialsException
@@ -155,6 +158,63 @@ async def resend_otp(
     await create_and_send_otp(redis, data.email, user.full_name)
 
     return {"message": "A new verification code has been sent to your email"}
+
+
+async def forgot_password(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    data: ForgotPasswordRequest
+) -> dict:
+    result = await db.execute(
+        select(User).where(User.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+
+    # Always return success even if email not found — prevents enumeration
+    if not user:
+        return {"message": "If an account exists with this email, a reset code has been sent"}
+
+    allowed = await can_resend_reset_otp(redis, data.email)
+    if not allowed:
+        remaining = await get_reset_cooldown_remaining(redis, data.email)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {remaining} seconds before requesting a new code"
+        )
+
+    await set_reset_resend_cooldown(redis, data.email)
+    await create_and_send_reset_otp(redis, data.email, user.full_name)
+
+    return {"message": "If an account exists with this email, a reset code has been sent"}
+
+
+async def reset_password(
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    data: ResetPasswordRequest
+) -> dict:
+    result = await db.execute(
+        select(User).where(User.email == data.email)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email"
+        )
+
+    is_valid = await verify_reset_otp(redis, data.email, data.otp)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code"
+        )
+
+    user.hashed_password = hash_password(data.new_password)
+    await db.flush()
+
+    return {"message": "Password reset successfully. You can now log in with your new password."}
 
 
 async def login_user(

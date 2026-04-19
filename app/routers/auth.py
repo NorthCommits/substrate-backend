@@ -8,7 +8,8 @@ from app.core.security import decode_access_token
 from app.schemas.user import (
     UserRegister, UserLogin, TokenResponse,
     UserResponse, RegisterResponse,
-    VerifyEmailRequest, ResendOtpRequest
+    VerifyEmailRequest, ResendOtpRequest,
+    ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.services import auth_service
 from app.utils.exceptions import InvalidTokenException
@@ -55,6 +56,24 @@ async def resend_otp(
     redis: Redis = Depends(get_redis)
 ):
     return await auth_service.resend_otp(db, redis, data)
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    return await auth_service.forgot_password(db, redis, data)
+
+
+@router.post("/reset-password")
+async def reset_password(
+    data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis)
+):
+    return await auth_service.reset_password(db, redis, data)
 
 
 @router.post("/login", response_model=TokenResponse)
