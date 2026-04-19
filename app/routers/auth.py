@@ -1,12 +1,12 @@
 import uuid
 import re
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token_async
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.user import UserResponse
@@ -20,6 +20,7 @@ bearer_scheme = HTTPBearer()
 
 def slugify(text: str) -> str:
     text = text.lower().strip()
+    import re
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_-]+", "-", text)
     text = re.sub(r"^-+|-+$", "", text)
@@ -30,7 +31,7 @@ async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> str:
     token = credentials.credentials
-    payload = decode_access_token(token)
+    payload = await decode_access_token_async(token)
     if not payload:
         raise InvalidTokenException()
     return payload.get("sub")
@@ -40,7 +41,7 @@ async def get_token_payload(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> dict:
     token = credentials.credentials
-    payload = decode_access_token(token)
+    payload = await decode_access_token_async(token)
     if not payload:
         raise InvalidTokenException()
     return payload
@@ -51,11 +52,6 @@ async def sync_user(
     payload: dict = Depends(get_token_payload),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Called by frontend after every Supabase login/signup.
-    Syncs the Supabase user into our PostgreSQL users table
-    and auto-creates a workspace if it's the first time.
-    """
     user_id = uuid.UUID(payload.get("sub"))
     email = payload.get("email", "")
     full_name = payload.get("user_metadata", {}).get("full_name")
